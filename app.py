@@ -43,15 +43,21 @@ Você é o rosto da RDA Eletro no WhatsApp!
 """
 
 conversation_history = {}
+MAX_HISTORY = 10
 
 def get_claude_response(telefone, user_message):
     if telefone not in conversation_history:
         conversation_history[telefone] = []
     
+    # Adicionar mensagem do usuário
     conversation_history[telefone].append({
         "role": "user",
         "content": user_message
     })
+    
+    # Manter apenas as últimas MAX_HISTORY mensagens
+    if len(conversation_history[telefone]) > MAX_HISTORY * 2:
+        conversation_history[telefone] = conversation_history[telefone][-MAX_HISTORY * 2:]
     
     try:
         response = client.messages.create(
@@ -62,12 +68,19 @@ def get_claude_response(telefone, user_message):
         )
         
         assistant_message = response.content[0].text
+        
+        # Adicionar resposta do assistente
         conversation_history[telefone].append({
             "role": "assistant",
             "content": assistant_message
         })
         
+        # Manter apenas as últimas MAX_HISTORY mensagens novamente
+        if len(conversation_history[telefone]) > MAX_HISTORY * 2:
+            conversation_history[telefone] = conversation_history[telefone][-MAX_HISTORY * 2:]
+        
         return assistant_message
+        
     except Exception as e:
         logger.error(f"Erro ao chamar Claude: {str(e)}")
         return "Desculpe, tive um problema técnico. Um atendente irá ajudá-lo em breve!"
