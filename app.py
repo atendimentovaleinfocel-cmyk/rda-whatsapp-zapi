@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import re
 from flask import Flask, request
 import anthropic
 import requests
@@ -46,6 +47,28 @@ def carregar_dados():
         logger.warning("politicas.json não encontrado")
     
     return dados
+
+def sanitizar_mensagem(texto):
+    """Sanitiza a mensagem para evitar problemas com Z-API"""
+    if not texto:
+        return "Olá! Como posso ajudá-lo?"
+    
+    # Converte para string se não for
+    texto = str(texto)
+    
+    # Remove caracteres problemáticos mas mantém emojis comuns
+    # Mantém: letras, números, espaços, pontuação comum, quebras de linha, emojis
+    # Remove: caracteres de controle
+    texto = ''.join(char for char in texto if char.isprintable() or ord(char) in [9, 10, 13])
+    
+    # Remove linhas vazias múltiplas
+    texto = re.sub(r'\n\s*\n', '\n', texto)
+    
+    # Garante que não está vazio
+    if not texto.strip():
+        return "Olá! Como posso ajudá-lo?"
+    
+    return texto
 
 DADOS = carregar_dados()
 
@@ -214,13 +237,19 @@ def webhook():
         logger.info(f"[{phone}] Enviando via Z-API...")
         
         try:
-            # CORRIGIDO: usar "text" em vez de "message"
-            r = requests.post(f"{ZAPI_URL}/send-text", json={"phone": phone, "text": reply})
+            # Sanitiza a resposta
+            reply_sanitizada = sanitizar_mensagem(reply)
+            logger.info(f"[{phone}] Mensagem sanitizada: {reply_sanitizada[:50]}...")
+            
+            # Envia para Z-API usando "message" (formato correto)
+            r = requests.post(f"{ZAPI_URL}/send-text", json={"phone": phone, "message": reply_sanitizada})
             logger.info(f"[{phone}] Z-API Status: {r.status_code}")
+            
             if r.status_code == 200:
                 logger.info(f"[{phone}] ✅ Mensagem enviada com sucesso!")
             else:
                 logger.error(f"[{phone}] ❌ Erro Z-API: {r.text}")
+                
         except Exception as e:
             logger.error(f"[{phone}] ERRO Z-API: {str(e)}")
         
