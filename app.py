@@ -145,7 +145,7 @@ WhatsApp: +55 12 3432-5923 | www.rdaeletro.com.br
 Seg-Sex 9h-18h | Sábado 9h-12h 😊"
 
 --- FLUXO: APARELHO FORA DE GARANTIA ---
-Cliente: "Quanto tempo leva para avaliar meu aparelho?"
+Cliente: "Quanto tempo leva para avaliar?"
 Rita: "Para aparelhos fora de garantia, o prazo de avaliação é de 3 a 5 dias úteis! ⏱️
 Você pode trazer pessoalmente ou enviar fotos do defeito.
 WhatsApp: +55 12 3432-5923 | www.rdaeletro.com.br 😊"
@@ -214,8 +214,13 @@ def webhook():
         logger.info(f"[{phone}] Enviando via Z-API...")
         
         try:
-            r = requests.post(f"{ZAPI_URL}/send-text", json={"phone": phone, "message": reply})
+            # CORRIGIDO: usar "text" em vez de "message"
+            r = requests.post(f"{ZAPI_URL}/send-text", json={"phone": phone, "text": reply})
             logger.info(f"[{phone}] Z-API Status: {r.status_code}")
+            if r.status_code == 200:
+                logger.info(f"[{phone}] ✅ Mensagem enviada com sucesso!")
+            else:
+                logger.error(f"[{phone}] ❌ Erro Z-API: {r.text}")
         except Exception as e:
             logger.error(f"[{phone}] ERRO Z-API: {str(e)}")
         
