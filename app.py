@@ -330,7 +330,7 @@ def get_claude_response(phone, user_message):
 def send_zapi_message(phone, message_text):
     try:
         url = f"{ZAPI_URL}/send-text"
-        payload = {"phone": phone, "message": message_text}
+       payload = {"phone": phone, "message": message_text, "isAutomatic": True}
         headers = {"Content-Type": "application/json", "Client-Token": ZAPI_TOKEN}
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code in [200, 201]:
