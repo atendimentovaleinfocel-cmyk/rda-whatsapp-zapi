@@ -5,7 +5,7 @@ import anthropic
 import requests
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Configuração
@@ -13,6 +13,10 @@ ZAPI_TOKEN = os.getenv("ZAPI_TOKEN")
 ZAPI_INSTANCE = os.getenv("ZAPI_INSTANCE")
 ZAPI_URL = f"https://api.z-api.io/instances/{ZAPI_INSTANCE}/token/{ZAPI_TOKEN}"
 CLAUDE_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+logger.info(f"CLAUDE_API_KEY configurada: {bool(CLAUDE_API_KEY)}")
+logger.info(f"ZAPI_TOKEN configurada: {bool(ZAPI_TOKEN)}")
+logger.info(f"ZAPI_INSTANCE configurada: {bool(ZAPI_INSTANCE)}")
 
 client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
@@ -43,23 +47,28 @@ Você é o rosto da RDA Eletro no WhatsApp!
 """
 
 conversation_history = {}
-MAX_HISTORY = 10
+MAX_MESSAGES = 20
 
 def get_claude_response(telefone, user_message):
-    if telefone not in conversation_history:
-        conversation_history[telefone] = []
-    
-    # Adicionar mensagem do usuário
-    conversation_history[telefone].append({
-        "role": "user",
-        "content": user_message
-    })
-    
-    # Manter apenas as últimas MAX_HISTORY mensagens
-    if len(conversation_history[telefone]) > MAX_HISTORY * 2:
-        conversation_history[telefone] = conversation_history[telefone][-MAX_HISTORY * 2:]
-    
     try:
+        if telefone not in conversation_history:
+            conversation_history[telefone] = []
+        
+        logger.info(f"[{telefone}] Recebido: {user_message}")
+        logger.info(f"[{telefone}] Histórico tem {len(conversation_history[telefone])} mensagens")
+        
+        # Adicionar mensagem do usuário
+        conversation_history[telefone].append({
+            "role": "user",
+            "content": user_message
+        })
+        
+        # Manter apenas as últimas MAX_MESSAGES
+        if len(conversation_history[telefone]) > MAX_MESSAGES:
+            conversation_history[telefone] = conversation_history[telefone][-MAX_MESSAGES:]
+        
+        logger.info(f"[{telefone}] Chamando Claude API...")
+        
         response = client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=500,
@@ -67,7 +76,11 @@ def get_claude_response(telefone, user_message):
             messages=conversation_history[telefone]
         )
         
+        logger.info(f"[{telefone}] Resposta recebida do Claude")
+        
         assistant_message = response.content[0].text
+        
+        logger.info(f"[{telefone}] Mensagem: {assistant_message[:100]}...")
         
         # Adicionar resposta do assistente
         conversation_history[telefone].append({
@@ -75,14 +88,14 @@ def get_claude_response(telefone, user_message):
             "content": assistant_message
         })
         
-        # Manter apenas as últimas MAX_HISTORY mensagens novamente
-        if len(conversation_history[telefone]) > MAX_HISTORY * 2:
-            conversation_history[telefone] = conversation_history[telefone][-MAX_HISTORY * 2:]
+        # Manter apenas as últimas MAX_MESSAGES novamente
+        if len(conversation_history[telefone]) > MAX_MESSAGES:
+            conversation_history[telefone] = conversation_history[telefone][-MAX_MESSAGES:]
         
         return assistant_message
         
     except Exception as e:
-        logger.error(f"Erro ao chamar Claude: {str(e)}")
+        logger.error(f"[{telefone}] ERRO ao chamar Claude: {type(e).__name__}: {str(e)}")
         return "Desculpe, tive um problema técnico. Um atendente irá ajudá-lo em breve!"
 
 @app.route("/webhook", methods=["POST"])
@@ -95,6 +108,7 @@ def webhook():
         message_text = data.get("text")
         
         if not telefone or not message_text:
+            logger.warning("Dados inválidos no webhook")
             return {"status": "error", "message": "Dados inválidos"}, 400
         
         # Obter resposta do Claude
@@ -105,19 +119,21 @@ def webhook():
         headers = {"Content-Type": "application/json"}
         
         try:
+            logger.info(f"Enviando resposta via Z-API para {telefone}")
             resp = requests.post(f"{ZAPI_URL}/send-text", json=payload, headers=headers)
+            
             if resp.status_code in [200, 201]:
-                logger.info(f"Mensagem enviada para {telefone}")
+                logger.info(f"Mensagem enviada com sucesso para {telefone}")
                 return {"status": "success"}, 200
             else:
-                logger.error(f"Erro Z-API: {resp.text}")
+                logger.error(f"Erro Z-API ({resp.status_code}): {resp.text}")
                 return {"status": "error"}, 500
         except Exception as e:
-            logger.error(f"Erro ao enviar via Z-API: {str(e)}")
+            logger.error(f"Erro ao enviar via Z-API: {type(e).__name__}: {str(e)}")
             return {"status": "error"}, 500
             
     except Exception as e:
-        logger.error(f"Erro no webhook: {str(e)}")
+        logger.error(f"Erro no webhook: {type(e).__name__}: {str(e)}")
         return {"status": "error", "message": str(e)}, 500
 
 @app.route("/health", methods=["GET"])
