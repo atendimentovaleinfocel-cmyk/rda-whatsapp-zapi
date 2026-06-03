@@ -57,8 +57,6 @@ def sanitizar_mensagem(texto):
     texto = str(texto)
     
     # Remove caracteres problemáticos mas mantém emojis comuns
-    # Mantém: letras, números, espaços, pontuação comum, quebras de linha, emojis
-    # Remove: caracteres de controle
     texto = ''.join(char for char in texto if char.isprintable() or ord(char) in [9, 10, 13])
     
     # Remove linhas vazias múltiplas
@@ -108,6 +106,7 @@ PHILCO, BRITANIA, MONDIAL, AIWA, WAP, OSTER, CADENCE, ARNO
 7. SEMPRE termine mencionando www.rdaeletro.com.br
 8. Quando cliente agradecer/despedir: Agradeça e diga que está sempre à disposição
 9. PRAZO PARA AVALIAÇÃO EM APARELHOS FORA DE GARANTIA: 3 A 5 DIAS ÚTEIS
+10. QUANDO RECEBER IMAGEM: Agradeça, diga que um atendente vai analisar, peça descrição do defeito
 
 --- VOZ E TOM ---
 ✅ Responsável - Nunca promessa vazia
@@ -121,6 +120,12 @@ PHILCO, BRITANIA, MONDIAL, AIWA, WAP, OSTER, CADENCE, ARNO
 
 --- POLÍTICAS E INFORMAÇÕES ---
 {json.dumps(DADOS.get('politicas', {}), ensure_ascii=False, indent=2)}
+
+--- FLUXO: IMAGEM RECEBIDA ---
+Cliente: [envia foto]
+Rita: "Obrigada pela foto! 📸 Um atendente vai analisar com cuidado.
+Enquanto isso, qual é o *defeito* que está acontecendo?
+www.rdaeletro.com.br 😊"
 
 --- FLUXO: MARCA AUTORIZADA ---
 Cliente: "Meu ventilador WAP não funciona"
@@ -197,21 +202,42 @@ www.rdaeletro.com.br"
 def webhook():
     try:
         data = request.json
-        if 'text' not in data or 'message' not in data['text']:
-            return {'status': 'ok'}, 200
-        
         phone = data.get('phone')
-        text = data['text'].get('message')
         
-        if not phone or not text:
+        if not phone:
             return {'status': 'ok'}, 200
         
-        logger.info(f"[{phone}] Mensagem: {text}")
+        # Verifica se é mensagem de texto
+        is_text = False
+        text = None
         
+        if 'text' in data and 'message' in data['text']:
+            is_text = True
+            text = data['text'].get('message')
+            logger.info(f"[{phone}] Mensagem de TEXTO: {text}")
+        
+        # Verifica se é imagem
+        is_image = False
+        image_info = None
+        
+        if 'image' in data:
+            is_image = True
+            image_info = data['image']
+            logger.info(f"[{phone}] IMAGEM recebida")
+        
+        # Se não for texto nem imagem, ignora
+        if not is_text and not is_image:
+            return {'status': 'ok'}, 200
+        
+        # Adiciona ao histórico
         if phone not in conversation_history:
             conversation_history[phone] = []
         
-        conversation_history[phone].append({"role": "user", "content": text})
+        if is_text:
+            conversation_history[phone].append({"role": "user", "content": text})
+        elif is_image:
+            # Para imagem, adiciona mensagem padrão ao histórico
+            conversation_history[phone].append({"role": "user", "content": "[Cliente enviou uma imagem]"})
         
         if len(conversation_history[phone]) > MAX_MESSAGES:
             conversation_history[phone] = conversation_history[phone][-MAX_MESSAGES:]
@@ -219,15 +245,21 @@ def webhook():
         logger.info(f"[{phone}] Chamando Claude...")
         
         try:
-            response = client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=500,
-                system=SYSTEM_PROMPT,
-                messages=conversation_history[phone]
-            )
+            # Se for imagem, gera resposta padrão para imagem
+            if is_image:
+                reply = "Obrigada pela foto! 📸 Um atendente vai analisar com cuidado.\nEnquanto isso, qual é o *defeito* que está acontecendo?\nwww.rdaeletro.com.br 😊"
+            else:
+                # Se for texto, chama Claude
+                response = client.messages.create(
+                    model="claude-opus-4-6",
+                    max_tokens=500,
+                    system=SYSTEM_PROMPT,
+                    messages=conversation_history[phone]
+                )
+                
+                reply = response.content[0].text
+                conversation_history[phone].append({"role": "assistant", "content": reply})
             
-            reply = response.content[0].text
-            conversation_history[phone].append({"role": "assistant", "content": reply})
             logger.info(f"[{phone}] Resposta OK: {reply[:50]}...")
             
         except Exception as e:
@@ -241,7 +273,7 @@ def webhook():
             reply_sanitizada = sanitizar_mensagem(reply)
             logger.info(f"[{phone}] Mensagem sanitizada: {reply_sanitizada[:50]}...")
             
-            # Envia para Z-API usando "message" (formato correto)
+            # Envia para Z-API
             r = requests.post(f"{ZAPI_URL}/send-text", json={"phone": phone, "message": reply_sanitizada})
             logger.info(f"[{phone}] Z-API Status: {r.status_code}")
             
